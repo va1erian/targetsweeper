@@ -757,7 +757,7 @@ dependencies = [
 [[package]]
 name = "xui-core"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=5413c3ace018b0de7c0d1d738b332d04365a3ea7#5413c3ace018b0de7c0d1d738b332d04365a3ea7"
+source = "git+https://github.com/va1erian/xui?rev=ec94d605258be5bd19abe876fccd285091c05fdb#ec94d605258be5bd19abe876fccd285091c05fdb"
 dependencies = [
  "png",
  "zune-jpeg",
@@ -766,7 +766,7 @@ dependencies = [
 [[package]]
 name = "xui-gpu"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=5413c3ace018b0de7c0d1d738b332d04365a3ea7#5413c3ace018b0de7c0d1d738b332d04365a3ea7"
+source = "git+https://github.com/va1erian/xui?rev=ec94d605258be5bd19abe876fccd285091c05fdb#ec94d605258be5bd19abe876fccd285091c05fdb"
 dependencies = [
  "glow",
  "xui-core",
@@ -775,7 +775,7 @@ dependencies = [
 [[package]]
 name = "xui-win32"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=5413c3ace018b0de7c0d1d738b332d04365a3ea7#5413c3ace018b0de7c0d1d738b332d04365a3ea7"
+source = "git+https://github.com/va1erian/xui?rev=ec94d605258be5bd19abe876fccd285091c05fdb#ec94d605258be5bd19abe876fccd285091c05fdb"
 dependencies = [
  "embed-resource",
  "glow",
