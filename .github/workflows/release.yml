@@ -79,9 +79,26 @@ jobs:
           # A release for the tag may already exist (created by hand or by an
           # earlier run); re-runs must refresh its assets, not fail.
           gh release view $tag --repo $repo *> $null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "release $tag already exists; uploading the new assets"
-            gh release upload $tag targetsweeper.exe targetsweeper.exe.sha256 --repo $repo --clobber
-          } else {
+          if ($LASTEXITCODE -ne 0) {
             gh release create $tag targetsweeper.exe targetsweeper.exe.sha256 --repo $repo --title $tag --generate-notes
+            exit $LASTEXITCODE
           }
+
+          Write-Host "release $tag already exists; replacing its assets"
+          # `gh release upload --clobber` deletes an asset before uploading its
+          # replacement, so keep the currently published files and restore
+          # them if the replacement upload fails.
+          $backup = Join-Path $env:RUNNER_TEMP "previous-assets"
+          New-Item -ItemType Directory -Force -Path $backup | Out-Null
+          gh release download $tag --repo $repo --pattern "targetsweeper.exe*" --dir $backup --clobber *> $null
+          $previous = @(Get-ChildItem -Path $backup -File -ErrorAction SilentlyContinue)
+
+          gh release upload $tag targetsweeper.exe targetsweeper.exe.sha256 --repo $repo --clobber
+          if ($LASTEXITCODE -eq 0) {
+            exit 0
+          }
+          if ($previous.Count -gt 0) {
+            Write-Host "asset upload failed; restoring the previously published assets"
+            gh release upload $tag $previous.FullName --repo $repo --clobber
+          }
+          exit 1
