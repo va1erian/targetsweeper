@@ -35,7 +35,7 @@ impl ListModel for TargetModel {
         let target = self.rows.get(*self.order.get(row)?)?;
         Some(match column {
             COLUMN_PROJECT => target.project.as_str(),
-            COLUMN_PATH => target.path.to_str()?,
+            COLUMN_PATH => target.path_text.as_str(),
             COLUMN_SIZE => target.size_text.as_str(),
             COLUMN_MODIFIED => target.modified_text.as_str(),
             _ => "",
@@ -85,8 +85,10 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     fn target(name: &str, size: u64, age_secs: u64) -> Target {
+        let path = std::path::PathBuf::from(format!("C:\\{name}\\target"));
         Target {
-            path: std::path::PathBuf::from(format!("C:\\{name}\\target")),
+            path_text: path.to_string_lossy().into_owned(),
+            path,
             project: name.to_string(),
             size,
             files: 0,

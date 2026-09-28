@@ -404,12 +404,18 @@ impl App for Sweeper {
                 self.refresh_status();
             }
             Msg::Sort(column) => {
+                let old_order = Rc::clone(&self.order);
                 let ascending = match self.sort {
                     Some((sorted, was)) if sorted == column => !was,
                     _ => true,
                 };
                 self.sort = Some((column, ascending));
                 self.reorder();
+                // The selection is stored as display-row indices; remap it by
+                // target so a sort cannot leave a row pointing at another
+                // directory (and a later delete deleting something else).
+                self.selection =
+                    remap_selection(&self.selection, &old_order, &self.order, &self.rows);
                 self.list.set_sort_indicator(
                     column,
                     if ascending {
@@ -419,6 +425,7 @@ impl App for Sweeper {
                     },
                 );
                 self.list.set_model(self.model());
+                self.list.set_selection(&self.selection);
                 self.refresh_status();
             }
             Msg::RequestDelete => self.confirm_delete(ui),
@@ -486,4 +493,64 @@ fn start_delete(proxy: Proxy<Msg>, paths: Vec<PathBuf>) {
         }
         let _ = proxy.send(Msg::DeleteDone(report));
     });
+}
+
+/// Remaps display-row indices to the same targets after `order` changed, so a
+/// reorder (a sort) can never leave a selected row pointing at a different
+/// directory.
+fn remap_selection(
+    selection: &[usize],
+    old_order: &[usize],
+    new_order: &[usize],
+    rows: &[Target],
+) -> Vec<usize> {
+    let selected: HashSet<&Path> = selection
+        .iter()
+        .filter_map(|&row| old_order.get(row).and_then(|&index| rows.get(index)))
+        .map(|target| target.path.as_path())
+        .collect();
+    new_order
+        .iter()
+        .enumerate()
+        .filter_map(|(row, &index)| {
+            rows.get(index)
+                .is_some_and(|target| selected.contains(target.path.as_path()))
+                .then_some(row)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target(path: &str) -> Target {
+        Target {
+            path: PathBuf::from(path),
+            project: path.to_string(),
+            size: 0,
+            files: 0,
+            modified: None,
+            path_text: path.to_string(),
+            size_text: String::new(),
+            modified_text: String::new(),
+        }
+    }
+
+    #[test]
+    fn sorting_remaps_the_selection_by_target() {
+        let rows = vec![
+            target("C:\\a\\target"),
+            target("C:\\b\\target"),
+            target("C:\\c\\target"),
+        ];
+        let old_order = vec![0, 1, 2];
+        // Reversed: c, b, a. Rows 0 (a) and 2 (c) become rows 2 and 0.
+        assert_eq!(
+            remap_selection(&[0, 2], &old_order, &[2, 1, 0], &rows),
+            vec![0, 2]
+        );
+        // A selection whose target is no longer listed maps to nothing.
+        assert!(remap_selection(&[1], &old_order, &[2, 0], &rows[0..1]).is_empty());
+    }
 }

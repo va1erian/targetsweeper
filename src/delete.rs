@@ -74,8 +74,10 @@ fn remove_tree(dir: &Path, out: &mut Removal) {
             }
         };
         if scan::is_reparse(&metadata) {
-            // Remove the link itself; its target is never touched.
-            let result = if metadata.is_dir() {
+            // Remove the link itself; its target is never touched. A
+            // directory link (junction or directory symlink) must go through
+            // `remove_dir`: `Metadata::is_dir` is false for reparse points.
+            let result = if scan::is_directory(&metadata) {
                 fs::remove_dir(&path)
             } else {
                 fs::remove_file(&path)
@@ -159,10 +161,10 @@ mod tests {
         fs::create_dir_all(&outside).unwrap();
         fs::write(outside.join("precious.txt"), "precious").unwrap();
 
-        // Creating a directory symlink needs Developer Mode or elevation; the
-        // escape check is only meaningful when the link exists.
-        if std::os::windows::fs::symlink_dir(&outside, target.join("link")).is_err() {
-            eprintln!("skipping: cannot create a directory symlink here");
+        // A symbolic link needs Developer Mode or elevation; a junction does
+        // not, and it is the more common escape vector on Windows.
+        if !make_directory_link(&target.join("link"), &outside) {
+            eprintln!("skipping: cannot create a directory link here");
             return;
         }
 
@@ -173,5 +175,19 @@ mod tests {
             outside.join("precious.txt").exists(),
             "the link's target was never followed"
         );
+    }
+
+    /// Creates a directory symlink, falling back to a junction, which needs no
+    /// privilege. Returns whether a link was created.
+    fn make_directory_link(link: &Path, target: &Path) -> bool {
+        if std::os::windows::fs::symlink_dir(target, link).is_ok() {
+            return true;
+        }
+        std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .status()
+            .is_ok_and(|status| status.success())
     }
 }

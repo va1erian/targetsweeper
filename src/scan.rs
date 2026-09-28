@@ -57,6 +57,8 @@ pub struct Target {
     pub files: u64,
     /// The newest file modification time seen, if any.
     pub modified: Option<SystemTime>,
+    /// `path` preformatted for the list (lossy on non-Unicode names).
+    pub path_text: String,
     /// `size` preformatted for the list.
     pub size_text: String,
     /// `modified` preformatted for the list.
@@ -170,8 +172,11 @@ impl Walker<'_> {
                 continue;
             };
             let name = entry.file_name();
-            let Some(name) = name.to_str() else { continue };
-            if SKIP.contains(&name.to_ascii_lowercase().as_str()) {
+            // A name with an unpaired surrogate is not UTF-8; compare lossily
+            // and keep walking so its subtree is not silently skipped.
+            let name = name.to_string_lossy();
+            let lowered = name.to_ascii_lowercase();
+            if SKIP.contains(&lowered.as_str()) {
                 continue;
             }
             // `DirEntry::metadata` does not traverse a symlink.
@@ -183,7 +188,7 @@ impl Walker<'_> {
                 continue;
             }
             let child = entry.path();
-            if name.eq_ignore_ascii_case("target") && is_project_target(&child) {
+            if lowered == "target" && is_project_target(&child) {
                 self.out.targets.push(measure(&child));
                 // A verified target holds build artifacts, not projects.
                 continue;
@@ -284,6 +289,25 @@ pub(crate) fn is_reparse(metadata: &fs::Metadata) -> bool {
     }
 }
 
+/// Whether `metadata` (usually from `symlink_metadata`) describes a directory
+/// or a directory reparse point. Rust's `Metadata::is_dir` is false for
+/// reparse points, so the directory attribute is read directly; a junction
+/// must be removed with `remove_dir`, which deletes the link and not its
+/// target.
+pub(crate) fn is_directory(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // winnt.h: FILE_ATTRIBUTE_DIRECTORY.
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x0010;
+        metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.is_dir()
+    }
+}
+
 /// Sums the files under a verified target, never descending into a reparse
 /// point.
 fn measure(path: &Path) -> Target {
@@ -320,6 +344,7 @@ fn measure(path: &Path) -> Target {
             .and_then(Path::file_name)
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default(),
+        path_text: path.to_string_lossy().into_owned(),
         path: path.to_path_buf(),
         size,
         files,
