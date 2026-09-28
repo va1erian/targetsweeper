@@ -5,10 +5,10 @@ edition = "2024"
 description = "Find Cargo target directories on the fixed drives and delete them, with explicit confirmation"
 
 [dependencies]
-# xui rev with ListView/StatusBar arrange support (va1erian/xui#181, PR #182).
-# Swap to a released revision once that lands on main.
-xui-core = { git = "https://github.com/va1erian/xui", rev = "5413c3ace018b0de7c0d1d738b332d04365a3ea7" }
-xui-win32 = { git = "https://github.com/va1erian/xui", rev = "5413c3ace018b0de7c0d1d738b332d04365a3ea7" }
+# xui main with the ListView/StatusBar arrange support (va1erian/xui#181,
+# merged as xui commit ec94d60).
+xui-core = { git = "https://github.com/va1erian/xui", rev = "ec94d605258be5bd19abe876fccd285091c05fdb" }
+xui-win32 = { git = "https://github.com/va1erian/xui", rev = "ec94d605258be5bd19abe876fccd285091c05fdb" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [target.'cfg(windows)'.dependencies]
