@@ -499,6 +499,10 @@ fn start_scan(proxy: Proxy<Msg>, cancel: Arc<AtomicBool>, roots: Vec<PathBuf>, r
             let mut last_progress = Instant::now();
             let batch = RefCell::new(FoundBatch::new(proxy.clone(), run));
             let mut progress = |dir: &Path, dirs: u64, found: usize| {
+                // Called while walking and right before a measurement: flush
+                // whatever is pending, so a target never waits on a slow
+                // walker step (a large target's measurement, say).
+                batch.borrow_mut().flush();
                 if last_progress.elapsed() >= PROGRESS_REPORT_EVERY {
                     last_progress = Instant::now();
                     let _ = proxy.send(Msg::ScanProgress {
@@ -507,9 +511,6 @@ fn start_scan(proxy: Proxy<Msg>, cancel: Arc<AtomicBool>, roots: Vec<PathBuf>, r
                         found,
                         current: dir.to_path_buf(),
                     });
-                    // A lone target caught between progress ticks still shows
-                    // up promptly.
-                    batch.borrow_mut().flush();
                 }
             };
             let mut found = |target: &Target| batch.borrow_mut().push(target);
@@ -570,7 +571,8 @@ impl FoundBatch {
 const PROGRESS_REPORT_EVERY: Duration = Duration::from_millis(150);
 /// How many found targets are batched before a [`Msg::TargetsFound`] send.
 const FOUND_BATCH: usize = 16;
-/// How long found targets may wait for a batch, so slow scans still stream.
+/// The longest `push` holds a batch before forcing a flush; progress ticks
+/// (at most every [`PROGRESS_REPORT_EVERY`]) flush sooner.
 const FOUND_REPORT_EVERY: Duration = Duration::from_millis(250);
 
 /// Deletes on a worker thread, reporting per-directory progress and a final
