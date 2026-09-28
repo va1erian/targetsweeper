@@ -9,6 +9,7 @@
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -45,12 +46,15 @@ const SKIP: &[&str] = &[
 const PROGRESS_EVERY: Duration = Duration::from_millis(150);
 
 /// One verified Cargo target directory, with the numbers the list shows.
+///
+/// The text fields are shared (`Arc`) so streaming a batch into the list can
+/// copy a row without allocating its strings.
 #[derive(Clone, Debug)]
 pub struct Target {
     /// The `…\project\target` directory.
-    pub path: PathBuf,
+    pub path: Arc<Path>,
     /// The project directory's name.
-    pub project: String,
+    pub project: Arc<str>,
     /// Total logical bytes under the target directory.
     pub size: u64,
     /// The number of files under the target directory.
@@ -58,11 +62,11 @@ pub struct Target {
     /// The newest file modification time seen, if any.
     pub modified: Option<SystemTime>,
     /// `path` preformatted for the list (lossy on non-Unicode names).
-    pub path_text: String,
+    pub path_text: Arc<str>,
     /// `size` preformatted for the list.
-    pub size_text: String,
+    pub size_text: Arc<str>,
     /// `modified` preformatted for the list.
-    pub modified_text: String,
+    pub modified_text: Arc<str>,
 }
 
 /// What a scan found and what it could not read.
@@ -345,21 +349,24 @@ fn measure(path: &Path) -> Target {
             }
         }
     }
+    let project = path
+        .parent()
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
     Target {
-        project: path
-            .parent()
-            .and_then(Path::file_name)
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        path_text: path.to_string_lossy().into_owned(),
-        path: path.to_path_buf(),
+        project: Arc::from(project),
+        path_text: Arc::from(path.to_string_lossy().into_owned()),
+        path: Arc::from(path),
         size,
         files,
         modified,
-        size_text: format::human_size(size),
-        modified_text: modified
-            .map(format::local_stamp)
-            .unwrap_or_else(|| "unknown".into()),
+        size_text: Arc::from(format::human_size(size)),
+        modified_text: Arc::from(
+            modified
+                .map(format::local_stamp)
+                .unwrap_or_else(|| "unknown".into()),
+        ),
     }
 }
 
@@ -435,9 +442,13 @@ pub(crate) mod tests {
             &[root.to_path_buf()],
             &cancel,
             &mut |_, _, _| {},
-            &mut |target| streamed.borrow_mut().push(target.path.clone()),
+            &mut |target| {
+                streamed
+                    .borrow_mut()
+                    .push(target.path.as_ref().to_path_buf())
+            },
         );
-        let found: Vec<&Path> = outcome.targets.iter().map(|t| t.path.as_path()).collect();
+        let found: Vec<&Path> = outcome.targets.iter().map(|t| t.path.as_ref()).collect();
         assert_eq!(found, vec![real.as_path()]);
         assert_eq!(
             streamed.borrow().as_slice(),

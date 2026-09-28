@@ -24,7 +24,7 @@ use xui_core::{Dip, Insets, dip};
 
 use crate::delete::{self, DeleteReport};
 use crate::format;
-use crate::model::{COLUMN_SIZE, TargetModel, sorted_order};
+use crate::model::{COLUMN_SIZE, TargetModel, merged_order, sorted_order};
 use crate::scan::{self, Target};
 
 /// The messages the UI thread handles.
@@ -280,7 +280,7 @@ impl Sweeper {
             .selection
             .iter()
             .filter_map(|&row| self.order.get(row).and_then(|&index| self.rows.get(index)))
-            .map(|target| target.path.clone())
+            .map(|target| target.path.as_ref().to_path_buf())
             .collect();
         if paths.is_empty() {
             return;
@@ -301,7 +301,7 @@ impl Sweeper {
             let remaining: Vec<Target> = self
                 .rows
                 .iter()
-                .filter(|target| !removed.contains(&target.path))
+                .filter(|target| !removed.contains(target.path.as_ref()))
                 .cloned()
                 .collect();
             self.rows = Rc::new(remaining);
@@ -387,10 +387,13 @@ impl App for Sweeper {
                     return;
                 }
                 let old_order = Rc::clone(&self.order);
+                let base = self.rows.len();
                 let mut rows = self.rows.as_ref().clone();
                 rows.extend(targets);
                 self.rows = Rc::new(rows);
-                self.reorder();
+                // Merge the new rows into the existing order, so a batch does
+                // not re-sort every row that was already placed.
+                self.order = Rc::new(merged_order(&self.rows, &old_order, base, self.sort));
                 // As with a sort, the selection is a set of display rows:
                 // remap it by target so streaming rows in cannot make a
                 // selected row point at a different directory.
@@ -605,14 +608,14 @@ fn remap_selection(
     let selected: HashSet<&Path> = selection
         .iter()
         .filter_map(|&row| old_order.get(row).and_then(|&index| rows.get(index)))
-        .map(|target| target.path.as_path())
+        .map(|target| target.path.as_ref())
         .collect();
     new_order
         .iter()
         .enumerate()
         .filter_map(|(row, &index)| {
             rows.get(index)
-                .is_some_and(|target| selected.contains(target.path.as_path()))
+                .is_some_and(|target| selected.contains(target.path.as_ref()))
                 .then_some(row)
         })
         .collect()
@@ -624,14 +627,14 @@ mod tests {
 
     fn target(path: &str) -> Target {
         Target {
-            path: PathBuf::from(path),
-            project: path.to_string(),
+            path: Arc::from(PathBuf::from(path)),
+            project: Arc::from(path),
             size: 0,
             files: 0,
             modified: None,
-            path_text: path.to_string(),
-            size_text: String::new(),
-            modified_text: String::new(),
+            path_text: Arc::from(path),
+            size_text: Arc::from(""),
+            modified_text: Arc::from(""),
         }
     }
 
