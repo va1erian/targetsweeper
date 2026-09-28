@@ -198,6 +198,9 @@ impl Walker<'_> {
             }
             let child = entry.path();
             if lowered == "target" && is_project_target(&child) {
+                // Report progress before the measurement, so a caller can
+                // flush anything pending before a walk that may be long.
+                (self.progress)(dir, self.out.dirs, self.out.targets.len());
                 let target = measure(&child);
                 (self.found)(&target);
                 self.out.targets.push(target);
