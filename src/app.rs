@@ -5,6 +5,7 @@
 //! explicit confirmation, and every path is verified again inside the delete
 //! worker before it is touched.
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -32,12 +33,16 @@ pub enum Msg {
     Scan,
     /// A scan worker's progress report.
     ScanProgress {
+        run: u64,
         dirs: u64,
         found: usize,
         current: PathBuf,
     },
+    /// Targets the running scan found, streamed while it walks.
+    TargetsFound { run: u64, targets: Vec<Target> },
     /// A scan finished (or was cancelled), with everything found.
     ScanDone {
+        run: u64,
         targets: Vec<Target>,
         dirs: u64,
         errors: u64,
@@ -81,6 +86,8 @@ pub struct Sweeper {
     scanning: bool,
     deleting: bool,
     cancel: Arc<AtomicBool>,
+    /// Incremented per scan; worker messages from older runs are ignored.
+    run: u64,
     proxy: Proxy<Msg>,
     state_text: String,
     _mounted: Mounted<Msg>,
@@ -110,6 +117,7 @@ pub fn build(ui: &Ui<Msg>) -> Result<Sweeper> {
         .on_selection(|rows| Some(Msg::Selection(rows.to_vec())))
         .on_sort(|column| Some(Msg::Sort(column))),
     );
+    list.set_sort_indicator(COLUMN_SIZE, SortDirection::Descending);
     let status = Rc::new(StatusBar::auto(
         ui,
         &["Starting scan…", "0 targets", "0 selected"],
@@ -142,10 +150,11 @@ pub fn build(ui: &Ui<Msg>) -> Result<Sweeper> {
         rows: Rc::new(Vec::new()),
         order: Rc::new(Vec::new()),
         selection: Vec::new(),
-        sort: None,
+        sort: Some((COLUMN_SIZE, false)),
         scanning: false,
         deleting: false,
         cancel: Arc::new(AtomicBool::new(false)),
+        run: 0,
         proxy,
         state_text: "Starting scan…".into(),
         _mounted: mounted,
@@ -155,13 +164,20 @@ pub fn build(ui: &Ui<Msg>) -> Result<Sweeper> {
 }
 
 impl Sweeper {
-    /// Starts a scan on a worker thread; the UI keeps running.
+    /// Starts a scan on a worker thread; the UI keeps running. Results stream
+    /// in through [`Msg::TargetsFound`] while the scan walks.
     fn begin_scan(&mut self, ui: &Ui<Msg>) {
         if self.scanning || self.deleting {
             return;
         }
         self.scanning = true;
+        self.run += 1;
         self.cancel = Arc::new(AtomicBool::new(false));
+        self.rows = Rc::new(Vec::new());
+        self.order = Rc::new(Vec::new());
+        self.selection.clear();
+        self.list.set_model(self.model());
+        self.list.set_selection(&[]);
         self.state_text = "Scanning fixed drives…".into();
         self.scan.set_text("Cancel scan");
         self.refresh_status();
@@ -170,6 +186,7 @@ impl Sweeper {
             self.proxy.clone(),
             Arc::clone(&self.cancel),
             scan::fixed_drives(),
+            self.run,
         );
     }
 
@@ -351,39 +368,68 @@ impl App for Sweeper {
                 }
             }
             Msg::ScanProgress {
+                run,
                 dirs,
                 found,
                 current,
             } => {
+                if run != self.run {
+                    return;
+                }
                 self.state_text = format!(
                     "Scanning {} — {dirs} directories, {found} targets",
                     current.display()
                 );
                 self.refresh_status();
             }
+            Msg::TargetsFound { run, targets } => {
+                if run != self.run {
+                    return;
+                }
+                let old_order = Rc::clone(&self.order);
+                let mut rows = self.rows.as_ref().clone();
+                rows.extend(targets);
+                self.rows = Rc::new(rows);
+                self.reorder();
+                // As with a sort, the selection is a set of display rows:
+                // remap it by target so streaming rows in cannot make a
+                // selected row point at a different directory.
+                self.selection =
+                    remap_selection(&self.selection, &old_order, &self.order, &self.rows);
+                self.list.set_model(self.model());
+                self.list.set_selection(&self.selection);
+                self.refresh_status();
+            }
             Msg::ScanDone {
+                run,
                 targets,
                 dirs,
                 errors,
                 cancelled,
                 elapsed,
             } => {
+                if run != self.run {
+                    return;
+                }
                 self.scanning = false;
+                let old_order = Rc::clone(&self.order);
                 self.rows = Rc::new(targets);
-                self.sort = Some((COLUMN_SIZE, false));
                 self.reorder();
+                self.selection =
+                    remap_selection(&self.selection, &old_order, &self.order, &self.rows);
                 self.list.set_model(self.model());
-                self.list.set_selection(&[]);
-                self.list
-                    .set_sort_indicator(COLUMN_SIZE, SortDirection::Descending);
-                self.selection.clear();
+                self.list.set_selection(&self.selection);
                 self.scan.set_text("Rescan");
                 self.state_text = if cancelled {
-                    format!("Scan cancelled — {dirs} directories visited, {errors} unreadable")
+                    format!(
+                        "Scan cancelled — {dirs} directories visited, {errors} unreadable, {} targets",
+                        self.rows.len()
+                    )
                 } else {
                     format!(
-                        "Scanned {dirs} directories in {:.1}s — {errors} unreadable",
-                        elapsed.as_secs_f64()
+                        "Scanned {dirs} directories in {:.1}s — {} targets, {errors} unreadable",
+                        elapsed.as_secs_f64(),
+                        self.rows.len()
                     )
                 };
                 self.refresh_status();
@@ -441,25 +487,35 @@ impl App for Sweeper {
     }
 }
 
-/// Scans on a worker thread and reports through the proxy.
-fn start_scan(proxy: Proxy<Msg>, cancel: Arc<AtomicBool>, roots: Vec<PathBuf>) {
+/// Scans on a worker thread and reports through the proxy: progress while
+/// walking, found targets in small batches, then the final outcome.
+fn start_scan(proxy: Proxy<Msg>, cancel: Arc<AtomicBool>, roots: Vec<PathBuf>, run: u64) {
     thread::spawn(move || {
         let started = Instant::now();
         let outcome = {
-            let mut last = Instant::now();
+            let mut last_progress = Instant::now();
+            let batch = RefCell::new(FoundBatch::new(proxy.clone(), run));
             let mut progress = |dir: &Path, dirs: u64, found: usize| {
-                if last.elapsed() >= PROGRESS_REPORT_EVERY {
-                    last = Instant::now();
+                if last_progress.elapsed() >= PROGRESS_REPORT_EVERY {
+                    last_progress = Instant::now();
                     let _ = proxy.send(Msg::ScanProgress {
+                        run,
                         dirs,
                         found,
                         current: dir.to_path_buf(),
                     });
+                    // A lone target caught between progress ticks still shows
+                    // up promptly.
+                    batch.borrow_mut().flush();
                 }
             };
-            scan::scan(&roots, &cancel, &mut progress)
+            let mut found = |target: &Target| batch.borrow_mut().push(target);
+            let outcome = scan::scan(&roots, &cancel, &mut progress, &mut found);
+            batch.borrow_mut().flush();
+            outcome
         };
         let _ = proxy.send(Msg::ScanDone {
+            run,
             targets: outcome.targets,
             dirs: outcome.dirs,
             errors: outcome.errors,
@@ -469,8 +525,50 @@ fn start_scan(proxy: Proxy<Msg>, cancel: Arc<AtomicBool>, roots: Vec<PathBuf>) {
     });
 }
 
+/// Batches streamed targets so a burst is one message, but never holds them
+/// longer than [`FOUND_REPORT_EVERY`].
+struct FoundBatch {
+    proxy: Proxy<Msg>,
+    run: u64,
+    pending: Vec<Target>,
+    last: Instant,
+}
+
+impl FoundBatch {
+    fn new(proxy: Proxy<Msg>, run: u64) -> FoundBatch {
+        FoundBatch {
+            proxy,
+            run,
+            pending: Vec::new(),
+            last: Instant::now(),
+        }
+    }
+
+    fn push(&mut self, target: &Target) {
+        self.pending.push(target.clone());
+        if self.pending.len() >= FOUND_BATCH || self.last.elapsed() >= FOUND_REPORT_EVERY {
+            self.flush();
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.pending.is_empty() {
+            return;
+        }
+        self.last = Instant::now();
+        let _ = self.proxy.send(Msg::TargetsFound {
+            run: self.run,
+            targets: std::mem::take(&mut self.pending),
+        });
+    }
+}
+
 /// How often the scan worker reports progress.
 const PROGRESS_REPORT_EVERY: Duration = Duration::from_millis(150);
+/// How many found targets are batched before a [`Msg::TargetsFound`] send.
+const FOUND_BATCH: usize = 16;
+/// How long found targets may wait for a batch, so slow scans still stream.
+const FOUND_REPORT_EVERY: Duration = Duration::from_millis(250);
 
 /// Deletes on a worker thread, reporting per-directory progress and a final
 /// report.
@@ -496,8 +594,8 @@ fn start_delete(proxy: Proxy<Msg>, paths: Vec<PathBuf>) {
 }
 
 /// Remaps display-row indices to the same targets after `order` changed, so a
-/// reorder (a sort) can never leave a selected row pointing at a different
-/// directory.
+/// reorder (a sort, or newly streamed rows) can never leave a selected row
+/// pointing at a different directory.
 fn remap_selection(
     selection: &[usize],
     old_order: &[usize],

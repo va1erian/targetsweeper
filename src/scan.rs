@@ -110,17 +110,21 @@ pub fn fixed_drives() -> Vec<PathBuf> {
     vec![PathBuf::from("/")]
 }
 
-/// Walks `roots` and returns every verified target directory. `progress` is
-/// called while walking; it receives the current directory, the number of
-/// directories visited and the number of targets found.
+/// Walks `roots` and returns every verified target directory. `found` is
+/// called for each verified target as soon as it is measured, so a caller can
+/// show results while the scan is still running; `progress` is called while
+/// walking, with the current directory, the number of directories visited and
+/// the number of targets found.
 pub fn scan(
     roots: &[PathBuf],
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(&Path, u64, usize),
+    found: &mut dyn FnMut(&Target),
 ) -> ScanOutcome {
     let mut walker = Walker {
         cancel,
         progress,
+        found,
         out: ScanOutcome::default(),
         last_report: Instant::now(),
     };
@@ -137,6 +141,7 @@ pub fn scan(
 struct Walker<'a> {
     cancel: &'a AtomicBool,
     progress: &'a mut dyn FnMut(&Path, u64, usize),
+    found: &'a mut dyn FnMut(&Target),
     out: ScanOutcome,
     last_report: Instant,
 }
@@ -189,7 +194,9 @@ impl Walker<'_> {
             }
             let child = entry.path();
             if lowered == "target" && is_project_target(&child) {
-                self.out.targets.push(measure(&child));
+                let target = measure(&child);
+                (self.found)(&target);
+                self.out.targets.push(target);
                 // A verified target holds build artifacts, not projects.
                 continue;
             }
@@ -423,9 +430,20 @@ pub(crate) mod tests {
         fs::create_dir_all(root.join("node_modules").join("x").join("target")).unwrap();
 
         let cancel = AtomicBool::new(false);
-        let outcome = scan(&[root.to_path_buf()], &cancel, &mut |_, _, _| {});
+        let streamed = std::cell::RefCell::new(Vec::new());
+        let outcome = scan(
+            &[root.to_path_buf()],
+            &cancel,
+            &mut |_, _, _| {},
+            &mut |target| streamed.borrow_mut().push(target.path.clone()),
+        );
         let found: Vec<&Path> = outcome.targets.iter().map(|t| t.path.as_path()).collect();
         assert_eq!(found, vec![real.as_path()]);
+        assert_eq!(
+            streamed.borrow().as_slice(),
+            std::slice::from_ref(&real),
+            "the target was streamed as it was found"
+        );
         assert!(outcome.targets[0].size >= 2048);
         assert!(outcome.targets[0].files >= 1);
         assert!(!outcome.cancelled);
@@ -437,7 +455,12 @@ pub(crate) mod tests {
         let root = scratch.path();
         let real = cargo_target(root, "real");
         let cancel = AtomicBool::new(true);
-        let outcome = scan(&[root.to_path_buf()], &cancel, &mut |_, _, _| {});
+        let outcome = scan(
+            &[root.to_path_buf()],
+            &cancel,
+            &mut |_, _, _| {},
+            &mut |_| {},
+        );
         assert!(outcome.cancelled);
         assert!(outcome.targets.is_empty(), "{real:?} was not reached");
     }
