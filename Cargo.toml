@@ -5,10 +5,10 @@ edition = "2024"
 description = "Find Cargo target directories on the fixed drives and delete them, with explicit confirmation"
 
 [dependencies]
-# xui main with the ListView/StatusBar arrange support (va1erian/xui#181,
-# merged as xui commit ec94d60).
-xui-core = { git = "https://github.com/va1erian/xui", rev = "ad3a79875ef458e44d08836c851f4ab4fe0472ed" }
-xui-win32 = { git = "https://github.com/va1erian/xui", rev = "ad3a79875ef458e44d08836c851f4ab4fe0472ed" }
+# Pinned to xui main (ListView/StatusBar arrange support from va1erian/xui#181
+# plus everything since).
+xui-core = { git = "https://github.com/va1erian/xui", rev = "98829bad1aab8aa225f744a3be61072cc670cf97" }
+xui-win32 = { git = "https://github.com/va1erian/xui", rev = "98829bad1aab8aa225f744a3be61072cc670cf97" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [target.'cfg(windows)'.dependencies]
@@ -16,5 +16,20 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 windows = { version = "0.62", default-features = false, features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
+    "Win32_System_LibraryLoader",
     "Win32_System_WindowsProgramming",
+    "Win32_UI_WindowsAndMessaging",
 ] }
+
+[build-dependencies]
+# Embeds app.rc (the application icon) into the executable.
+embed-resource = "3.0"
+
+[profile.release]
+# The app ships as a single portable exe: optimize for size, strip it, and
+# abort instead of unwinding (there is no unwinding to do in a GUI app).
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

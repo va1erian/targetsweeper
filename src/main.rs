@@ -1,10 +1,12 @@
 //! Target Sweeper: find Cargo `target` directories on the fixed drives and
 //! delete selected ones, with an explicit confirmation and a second safety
 //! verification inside the delete worker.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
 mod delete;
 mod format;
+mod icon;
 mod model;
 mod scan;
 
@@ -19,6 +21,9 @@ fn main() -> Result<()> {
     run_app(
         backend,
         PlatformSpec::new("Target Sweeper").size(Dip(1100.0), Dip(680.0)),
-        |ui| app::build(ui).expect("the app's widgets were created"),
+        |ui| {
+            icon::apply(ui);
+            app::build(ui).expect("the app's widgets were created")
+        },
     )
 }
