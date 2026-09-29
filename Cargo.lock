@@ -401,9 +401,10 @@ dependencies = [
 
 [[package]]
 name = "targetsweeper"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
+ "embed-resource",
  "windows",
  "xui-core",
  "xui-win32",
@@ -757,7 +758,7 @@ dependencies = [
 [[package]]
 name = "xui-core"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=ec94d605258be5bd19abe876fccd285091c05fdb#ec94d605258be5bd19abe876fccd285091c05fdb"
+source = "git+https://github.com/va1erian/xui?rev=98829bad1aab8aa225f744a3be61072cc670cf97#98829bad1aab8aa225f744a3be61072cc670cf97"
 dependencies = [
  "png",
  "zune-jpeg",
@@ -766,7 +767,7 @@ dependencies = [
 [[package]]
 name = "xui-gpu"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=ec94d605258be5bd19abe876fccd285091c05fdb#ec94d605258be5bd19abe876fccd285091c05fdb"
+source = "git+https://github.com/va1erian/xui?rev=98829bad1aab8aa225f744a3be61072cc670cf97#98829bad1aab8aa225f744a3be61072cc670cf97"
 dependencies = [
  "glow",
  "xui-core",
@@ -775,7 +776,7 @@ dependencies = [
 [[package]]
 name = "xui-win32"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=ec94d605258be5bd19abe876fccd285091c05fdb#ec94d605258be5bd19abe876fccd285091c05fdb"
+source = "git+https://github.com/va1erian/xui?rev=98829bad1aab8aa225f744a3be61072cc670cf97#98829bad1aab8aa225f744a3be61072cc670cf97"
 dependencies = [
  "embed-resource",
  "glow",

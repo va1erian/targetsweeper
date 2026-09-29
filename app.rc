@@ -1,0 +1,6 @@
+#include <winres.h>
+
+// The application icon. Explorer and pinned shortcuts read it from the
+// executable's resources, and the app installs the same resource on its window
+// (see src/icon.rs), so the title bar and taskbar match.
+1 ICON "assets/cargo-sweep.ico"
