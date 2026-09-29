@@ -1,14 +1,14 @@
 [package]
 name = "targetsweeper"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Find Cargo target directories on the fixed drives and delete them, with explicit confirmation"
 
 [dependencies]
 # Pinned to xui main (ListView/StatusBar arrange support from va1erian/xui#181
 # plus everything since).
-xui-core = { git = "https://github.com/va1erian/xui", rev = "98829bad1aab8aa225f744a3be61072cc670cf97" }
-xui-win32 = { git = "https://github.com/va1erian/xui", rev = "98829bad1aab8aa225f744a3be61072cc670cf97" }
+xui-core = { git = "https://github.com/va1erian/xui", rev = "85db16f74e8ad9ed50e264babeece3d9978bb8bf" }
+xui-win32 = { git = "https://github.com/va1erian/xui", rev = "85db16f74e8ad9ed50e264babeece3d9978bb8bf" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [target.'cfg(windows)'.dependencies]
